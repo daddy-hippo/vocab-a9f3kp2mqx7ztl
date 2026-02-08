@@ -92,7 +92,7 @@ header span#todayCount {
 
 <script>
 const APP_NAME = '英検単語';
-const APP_VERSION = '(２級-Ver.5)';
+const APP_VERSION = '(2級-Ver.6)';
 function setHeader(html) {
   document.getElementById('header').innerHTML = `
     <div style="font-weight:700;">${APP_NAME} <span style="font-size:12px;">${APP_VERSION}</span></div>
@@ -17260,13 +17260,14 @@ function showWordList(section) {
 	setHeader(`
     <span class="back" onclick="showSectionList()">← 戻る</span>
     Section ${section}
-    <div class="progress">
-      進捗 ${learnedCount} / ${wordsInSection.length}（${percent}%）
-    </div>
-    <div class="progress-bar">
-    <div class="progress-bar-inner"
-      style="width:${percent}%; background:${barColor}">
-    </div>
+		<div class="progress" id="sectionProgress">
+		  進捗 ${learnedCount} / ${wordsInSection.length}（${percent}%）
+		</div>
+		<div class="progress-bar">
+		  <div class="progress-bar-inner" id="sectionProgressBar"
+		    style="width:${percent}%; background:${barColor}">
+		  </div>
+		</div>
     </div>
     <div style="font-size:12px; margin-top:4px;">
       今日覚えた数：<span id="todayCount">0</span>
@@ -17437,7 +17438,9 @@ function resetSection(section) {
 
 /* 今日の日付を取得 */
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
 }
 /* 今日覚えた分だけリセット */
 function resetToday(section) {
@@ -17479,12 +17482,16 @@ function updateSectionProgress(section) {
   else if (percent >= 50) barColor = '#ffa726';
 
   // ヘッダー内の要素を書き換え
-  document.querySelector('#header .progress').innerHTML =
-    `進捗 ${learnedCount} / ${wordsInSection.length}（${percent}%）`;
+	const progressEl = document.getElementById('sectionProgress');
+	if (progressEl) {
+	  progressEl.innerHTML = `進捗 ${learnedCount} / ${wordsInSection.length}（${percent}%）`;
+	}
 
-  const bar = document.querySelector('#header .progress-bar-inner');
-  bar.style.width = percent + '%';
-  bar.style.background = barColor;
+	const bar = document.getElementById('sectionProgressBar');
+	if (bar) {
+	  bar.style.width = percent + '%';
+	  bar.style.background = barColor;
+	}
 }
 function startTest(section, numQuestions = 10, mode = 'E2J') {
   section = String(section);
@@ -17691,11 +17698,12 @@ function renderTestResult() {
   const total = s.questions.length;
   const score = Math.round((s.correct / total) * 100);
 
-  document.getElementById('header').innerHTML = `
-    <span class="back" onclick="showWordList('${s.section}')">← 単語一覧へ</span>
-    テスト結果
-    <div class="progress">${s.correct} / ${total}（${score}%）</div>
-  `;
+	setHeader(`
+	  <span class="back" onclick="showWordList('${s.section}')">← 単語一覧へ</span>
+	  テスト結果
+	  <div class="progress">${s.correct} / ${total}（${score}%）</div>
+	`);
+
 
 	const retryAction =
 	  (s.mode === 'CLOZE' || s.type === 'cloze')
@@ -18092,13 +18100,7 @@ function startOneWeakTest(section, english, mode = 'E2J') {
   }
 
   const prompt = (mode === 'E2J') ? w.english : w.japanese;
-  const correct = (mode === 'E2J') ? w.japanese : w.english;
 
-  let others = pool.map(x => (mode === 'E2J') ? x.japanese : x.english);
-  let distractors = uniqueShuffle(others).slice(0, 3);
-
-//  const choices = shuffle([correct, ...distractors]);
-//  const correctIndex = choices.indexOf(correct);
 	const distractorWords = shuffle([...pool]).slice(0, 3);
 	const choices = shuffle([toChoiceFromWord(w), ...distractorWords.map(toChoiceFromWord)]);
 	const correctIndex = choices.findIndex(c => c.en === w.english);
