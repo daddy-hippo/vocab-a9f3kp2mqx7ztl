@@ -92,7 +92,7 @@ header span#todayCount {
 
 <script>
 const APP_NAME = '英検単語';
-const APP_VERSION = '(２級-Ver.4)';
+const APP_VERSION = '(２級-Ver.5)';
 function setHeader(html) {
   document.getElementById('header').innerHTML = `
     <div style="font-weight:700;">${APP_NAME} <span style="font-size:12px;">${APP_VERSION}</span></div>
@@ -17510,28 +17510,37 @@ function startTest(section, numQuestions = 10, mode = 'E2J') {
   const n = Math.min(numQuestions, pool.length);
   const picked = shuffle([...pool]).slice(0, n);
 
-  const questions = picked.map(word => {
-    // modeに応じて「問題文」と「正解」「誤答候補」を切り替える
-    const prompt = (mode === 'E2J') ? word.english : word.japanese;
-    const correct = (mode === 'E2J') ? word.japanese : word.english;
+	const questions = picked.map(word => {
+	  const prompt = (mode === 'E2J') ? word.english : word.japanese;
 
-    // 誤答候補（同セクション内から）
-    const others = allWords
-      .filter(w => w.section === section && w.english !== word.english)
-      .map(w => (mode === 'E2J') ? w.japanese : w.english);
+	  // 正解と誤答を「単語オブジェクト」で作る
+	  const pool = allWords.filter(w => w.section === section && w.english !== word.english);
 
-		const distractors = uniqueShuffle(others).slice(0, 3);
-		if (distractors.length < 3) {
-		  // セクション外から補充（保険）
-		  const fallback = uniqueShuffle(allWords.map(w => (mode==='E2J') ? w.japanese : w.english))
-		    .filter(x => x !== correct);
-		  while (distractors.length < 3 && fallback.length) distractors.push(fallback.shift());
-		}
-    const choices = shuffle([correct, ...distractors]);
-    const correctIndex = choices.indexOf(correct);
+	  let distractorWords = uniqueShuffle(pool.map(w => w.english))
+	    .map(en => pool.find(x => x.english === en))
+	    .filter(Boolean)
+	    .slice(0, 3);
 
-    return { word, prompt, choices, correctIndex };
-  });
+	  // 保険：3つ足りない時は全体から補充
+	  if (distractorWords.length < 3) {
+	    const fallback = allWords.filter(w => w.english !== word.english);
+	    const fbPicked = shuffle([...fallback]).slice(0, 20);
+	    for (const w of fbPicked) {
+	      if (distractorWords.length >= 3) break;
+	      if (!distractorWords.some(x => x.english === w.english)) distractorWords.push(w);
+	    }
+	  }
+
+	  const correctChoice = toChoiceFromWord(word);
+	  const distractors = distractorWords.map(toChoiceFromWord);
+
+	  const choices = shuffle([correctChoice, ...distractors]);
+
+	  // 正解インデックス（en で判定）
+	  const correctIndex = choices.findIndex(c => c.en === word.english);
+
+	  return { word, prompt, choices, correctIndex };
+	});
 
   testState = {
     section,
@@ -17576,12 +17585,12 @@ function renderTestScreen() {
     </div>
 
     <div style="margin-top:10px; display:grid; gap:8px;">
-      ${q.choices.map((c, i) => `
-        <button class="choice-btn" data-index="${i}"
-          style="width:100%; text-align:left; padding:12px; border-radius:10px;">
-          ${String.fromCharCode(65 + i)}. ${c}
-        </button>
-      `).join('')}
+			${q.choices.map((c, i) => `
+			  <button class="choice-btn" data-index="${i}"
+			    style="width:100%; text-align:left; padding:12px; border-radius:10px;">
+			    ${String.fromCharCode(65 + i)}. ${choiceLabel(c, s.mode)}
+			  </button>
+			`).join('')}
     </div>
 
     <div id="feedback" style="margin-top:10px; font-size:14px;"></div>
@@ -17608,13 +17617,13 @@ function renderTestScreen() {
         s.correct += 1;
         feedback.textContent = '✅ 正解';
       } else {
-        feedback.innerHTML = `❌ 不正解<br>正解：<strong>${q.choices[correct]}</strong>`;
-        s.wrong.push({
-          prompt: q.prompt,
-          correct: q.choices[correct],
-          chosen: q.choices[chosen],
-          mode: s.mode
-        });
+        feedback.innerHTML = `❌ 不正解<br>正解：<strong>${choiceLabel(q.choices[correct], s.mode)}</strong>`;
+				s.wrong.push({
+				  prompt: q.prompt,
+				  correct: choiceLabel(q.choices[correct], s.mode),
+				  chosen: choiceLabel(q.choices[chosen], s.mode),
+				  mode: s.mode
+				});
       }
 			// ★追加：例文穴埋め（CLOZE）のときは「例文」と「例文訳」を表示
 			if ((s.mode === 'CLOZE' || s.type === 'cloze') &&
@@ -17648,6 +17657,22 @@ function renderTestScreen() {
         if (i === chosen && chosen !== correct) b.style.border = '2px solid #ef5350';
         b.style.background = '#fff';
       });
+
+			// ★追加：4択すべての「英単語＝意味」を表示
+			const meaningBlock = `
+			  <div style="margin-top:10px; padding:10px; background:#f7f7f7; border-radius:10px;">
+			    <div style="font-size:12px; color:#666;">選択肢（英単語と意味）</div>
+			    <div style="margin-top:6px; display:grid; gap:6px;">
+			      ${q.choices.map((c, i) => `
+			        <div style="font-size:13px;">
+			          <strong>${String.fromCharCode(65 + i)}.</strong>
+			          ${c.en} ＝ ${c.ja}
+			        </div>
+			      `).join('')}
+			    </div>
+			  </div>
+			`;
+			feedback.innerHTML += meaningBlock;
 
       nextBtn.style.display = 'inline-block';
     });
@@ -17688,7 +17713,7 @@ function renderTestResult() {
     <div style="font-size:18px; font-weight:700;">スコア：${score}%</div>
     <div style="margin-top:6px;">正解：${s.correct} / ${total}</div>
     <div style="margin-top:10px;">
-      <button onclick="${retryAction}">もう一度（同数）</button>
+      <button onclick="${retryAction}">もう一度</button>
       <button style="margin-left:6px;" onclick="showWordList('${s.section}')">単語一覧へ</button>
     </div>
   `;
@@ -17916,28 +17941,37 @@ function startWeakTest(section, numQuestions = 10, mode = 'E2J') {
     return;
   }
 
-  const questions = picked.map(word => {
-    const prompt = (mode === 'E2J') ? word.english : word.japanese;
-    const correct = (mode === 'E2J') ? word.japanese : word.english;
+	const questions = picked.map(word => {
+	  const prompt = (mode === 'E2J') ? word.english : word.japanese;
 
-    const others = allWords
-      .filter(w => w.section === section && w.english !== word.english)
-      .map(w => (mode === 'E2J') ? w.japanese : w.english);
+	  // 正解と誤答を「単語オブジェクト」で作る
+	  const pool = allWords.filter(w => w.section === section && w.english !== word.english);
 
-    let distractors = uniqueShuffle(others).slice(0, 3);
+	  let distractorWords = uniqueShuffle(pool.map(w => w.english))
+	    .map(en => pool.find(x => x.english === en))
+	    .filter(Boolean)
+	    .slice(0, 3);
 
-    // 保険：重複などで3つ作れない場合
-    if (distractors.length < 3) {
-      const fallback = uniqueShuffle(allWords.map(w => (mode === 'E2J') ? w.japanese : w.english))
-        .filter(x => x !== correct);
-      while (distractors.length < 3 && fallback.length) distractors.push(fallback.shift());
-    }
+	  // 保険：3つ足りない時は全体から補充
+	  if (distractorWords.length < 3) {
+	    const fallback = allWords.filter(w => w.english !== word.english);
+	    const fbPicked = shuffle([...fallback]).slice(0, 20);
+	    for (const w of fbPicked) {
+	      if (distractorWords.length >= 3) break;
+	      if (!distractorWords.some(x => x.english === w.english)) distractorWords.push(w);
+	    }
+	  }
 
-    const choices = shuffle([correct, ...distractors]);
-    const correctIndex = choices.indexOf(correct);
+	  const correctChoice = toChoiceFromWord(word);
+	  const distractors = distractorWords.map(toChoiceFromWord);
 
-    return { word, prompt, choices, correctIndex };
-  });
+	  const choices = shuffle([correctChoice, ...distractors]);
+
+	  // 正解インデックス（en で判定）
+	  const correctIndex = choices.findIndex(c => c.en === word.english);
+
+	  return { word, prompt, choices, correctIndex };
+	});
 
   testState = {
     section,
@@ -17988,21 +18022,21 @@ function startClozeTest(section, numQuestions = 10) {
     const sentence = makeClozeSentence(word.english, word.example_en);
 
     // 誤答候補（同セクションから英単語）
-    const others = allWords
-      .filter(w => w.section === section && w.english !== word.english)
-      .map(w => w.english);
+		const others = allWords.filter(w => w.section === section && w.english !== word.english);
 
-    let distractors = uniqueShuffle(others).slice(0, 3);
+		let distractorWords = shuffle([...others]).slice(0, 3);
 
-    // 保険：3つ取れない時は全体から補充
-    if (distractors.length < 3) {
-      const fallback = uniqueShuffle(allWords.map(w => w.english))
-        .filter(x => x !== word.english);
-      while (distractors.length < 3 && fallback.length) distractors.push(fallback.shift());
-    }
+		// 保険
+		if (distractorWords.length < 3) {
+		  const fallback = allWords.filter(w => w.english !== word.english);
+		  for (const w of shuffle([...fallback])) {
+		    if (distractorWords.length >= 3) break;
+		    if (!distractorWords.some(x => x.english === w.english)) distractorWords.push(w);
+		  }
+		}
 
-    const choices = shuffle([word.english, ...distractors]);
-    const correctIndex = choices.indexOf(word.english);
+		const choices = shuffle([toChoiceFromWord(word), ...distractorWords.map(toChoiceFromWord)]);
+		const correctIndex = choices.findIndex(c => c.en === word.english);
 
     return {
       word,
@@ -18063,8 +18097,11 @@ function startOneWeakTest(section, english, mode = 'E2J') {
   let others = pool.map(x => (mode === 'E2J') ? x.japanese : x.english);
   let distractors = uniqueShuffle(others).slice(0, 3);
 
-  const choices = shuffle([correct, ...distractors]);
-  const correctIndex = choices.indexOf(correct);
+//  const choices = shuffle([correct, ...distractors]);
+//  const correctIndex = choices.indexOf(correct);
+	const distractorWords = shuffle([...pool]).slice(0, 3);
+	const choices = shuffle([toChoiceFromWord(w), ...distractorWords.map(toChoiceFromWord)]);
+	const correctIndex = choices.findIndex(c => c.en === w.english);
 
   testState = {
     section,
@@ -18201,6 +18238,16 @@ function shuffle(arr) {
 function uniqueShuffle(arr) {
   // 重複を除いてシャッフル
   return shuffle([...new Set(arr)]);
+}
+
+function toChoiceFromWord(w) {
+  return { en: w.english, ja: w.japanese };
+}
+
+function choiceLabel(choice, mode) {
+  // ボタンに表示する文字
+  if (mode === 'E2J') return choice.ja;     // 英→日：選択肢は日本語を見せる
+  return choice.en;                         // 日→英/穴埋め：英単語を見せる
 }
 
 </script>
