@@ -2,9 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>英検２級単語-Ver.2</title>
+<title>英検２級単語-Ver.3</title>
 <style>
 body { font-family: system-ui; margin:0; background:#f5f5f5; }
 header { background:#1e88e5; color:white; padding:14px; text-align:center; }
@@ -88,7 +87,7 @@ header span#todayCount {
 </head>
 <body>
 
-<header id="header">英検2級 単語学習</header>
+<header id="header">英検２級 単語学習</header>
 <div class="list" id="list"></div>
 
 <script>
@@ -17106,21 +17105,43 @@ let allWords =
 //   単語帳データ定義【終了】
 // ############################
 
+// base(原形) -> 不規則形一覧（過去形/過去分詞/三単現/ing など必要分だけ）
+const IRREGULAR_FORMS = {
+  be:   ['am','is','are','was','were','been','being'],
+  go:   ['goes','went','gone','going'],
+  do:   ['does','did','done','doing'],
+  have: ['has','had','having'],
+  make: ['made','making'],        // 不規則ではないが例として
+  take: ['took','taken','taking'],
+  come: ['came','come','coming'],
+  run:  ['ran','run','running'],
+  see:  ['saw','seen','seeing'],
+  get:  ['got','gotten','getting'], // gottenは米式
+  write:['wrote','written','writing'],
+  eat:  ['ate','eaten','eating'],
+  give: ['gave','given','giving'],
+  begin:['began','begun','beginning'],
+  // 必要に応じて追加
+};
+
 let learnedData = {};
 let showOnlyUnlearned = false;
+// ===== テスト用状態 =====
+let testState = null;
+// 例: {
+//   section: "1",
+//   questions: [{word, choices:[], correctIndex}], 
+//   index: 0,
+//   correct: 0,
+//   wrong: [] // [{english, correctJa, chosenJa}]
+// }
 
-// fetch('words_section1.json')
-// .then(res => res.json())
-// .then(data => {
-//   allWords = data;
 
-
-  showSectionList();
-// });
+showSectionList();
 
 function showSectionList() {
   currentSection = null;
-  document.getElementById('header').textContent = '英検2級 単語学習';
+  document.getElementById('header').textContent = '英検２級 単語学習';
   const list = document.getElementById('list');
   list.innerHTML = '';
 
@@ -17225,6 +17246,7 @@ function showWordList(section) {
   const list = document.getElementById('list');
   list.innerHTML = '';
 
+	const hasPhrase = sectionHasPhrase(section);
   document.getElementById('header').innerHTML = `
     <span class="back" onclick="showSectionList()">← 戻る</span>
     Section ${section}
@@ -17252,8 +17274,33 @@ function showWordList(section) {
       onclick="resetToday('${section}')">
       今日分リセット
     </button>
-  `;
-
+		<button style="margin-left:10px; font-size:12px;"
+		  onclick="startTest('${section}', 10, 'E2J')">
+		  テスト英→日
+		</button>
+		<button style="margin-left:6px; font-size:12px;"
+		  onclick="startTest('${section}', 10, 'J2E')">
+		  テスト日→英
+		</button>
+		<button style="margin-left:10px; font-size:12px;"
+		  onclick="startWeakTest('${section}', 10, 'E2J')">
+		  弱点テスト英→日
+		</button>
+		<button style="margin-left:6px; font-size:12px;"
+		  onclick="startWeakTest('${section}', 10, 'J2E')">
+		  弱点テスト日→英
+		</button>
+	  ${!hasPhrase ? `
+	    <button style="margin-left:10px; font-size:12px;"
+	      onclick="startClozeTest('${section}', 10)">
+	      例文穴埋め
+	    </button>
+	  ` : ''}
+		<button style="margin-left:10px; font-size:12px;"
+		  onclick="showMistakeList('${section}')">
+		  間違い帳
+		</button>
+ `;
 
   allWords
     .filter(w => w.section === section)
@@ -17274,7 +17321,14 @@ function showWordList(section) {
 	</span>
       </div>
       <strong>${w.english}</strong>
-      <div class="meaning">${w.japanese}</div>
+      <div class="meaning">
+	<div>${w.japanese}</div>
+	${w.派生語 ? `
+	  <div style="margin-top:6px; font-size:13px; color:#555;">
+	    <strong>派生語：</strong>${w.派生語}
+	  </div>
+        ` : ''}
+      </div>
       
       ${w.example_en && w.example_en.trim() ? `
         <button class="example-btn" style="display:none;">例文</button>
@@ -17422,10 +17476,724 @@ function updateSectionProgress(section) {
   bar.style.width = percent + '%';
   bar.style.background = barColor;
 }
+function startTest(section, numQuestions = 10, mode = 'E2J') {
+  section = String(section);
+  currentSection = section;
+
+  const key = `eiken2_section_${section}`;
+  learnedData = JSON.parse(localStorage.getItem(key) || '{}');
+
+  // 出題プール
+  let pool = allWords.filter(w => w.section === section);
+
+  // 未習得のみONなら未習得から
+  if (showOnlyUnlearned) {
+    pool = pool.filter(w => !learnedData[w.english]);
+  }
+
+  // 4択には最低4語必要
+  if (pool.length < 4) {
+    alert('テストを作るための単語数が足りません（最低4語必要です）。');
+    return;
+  }
+
+  const n = Math.min(numQuestions, pool.length);
+  const picked = shuffle([...pool]).slice(0, n);
+
+  const questions = picked.map(word => {
+    // modeに応じて「問題文」と「正解」「誤答候補」を切り替える
+    const prompt = (mode === 'E2J') ? word.english : word.japanese;
+    const correct = (mode === 'E2J') ? word.japanese : word.english;
+
+    // 誤答候補（同セクション内から）
+    const others = allWords
+      .filter(w => w.section === section && w.english !== word.english)
+      .map(w => (mode === 'E2J') ? w.japanese : w.english);
+
+		const distractors = uniqueShuffle(others).slice(0, 3);
+		if (distractors.length < 3) {
+		  // セクション外から補充（保険）
+		  const fallback = uniqueShuffle(allWords.map(w => (mode==='E2J') ? w.japanese : w.english))
+		    .filter(x => x !== correct);
+		  while (distractors.length < 3 && fallback.length) distractors.push(fallback.shift());
+		}
+    const choices = shuffle([correct, ...distractors]);
+    const correctIndex = choices.indexOf(correct);
+
+    return { word, prompt, choices, correctIndex };
+  });
+
+  testState = {
+    section,
+    mode,          // ★追加
+    questions,
+    index: 0,
+    correct: 0,
+    wrong: []
+  };
+
+  renderTestScreen();
+}
+
+function renderTestScreen() {
+  const s = testState;
+  const q = s.questions[s.index];
+
+	const modeLabel =
+	  (s.mode === 'E2J') ? '英→日 4択' :
+	  (s.mode === 'J2E') ? '日→英 4択' :
+	  '例文穴埋め 4択';
+
+  document.getElementById('header').innerHTML = `
+    <span class="back" onclick="showWordList('${s.section}')">← 単語一覧へ</span>
+    テスト（${modeLabel}）
+    <div class="progress">
+      第 ${s.index + 1} 問 / ${s.questions.length}　正解：${s.correct}
+    </div>
+  `;
+
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+
+  const card = document.createElement('div');
+  card.className = 'item';
+  card.innerHTML = `
+    <div style="font-size:12px; color:#888;">Section ${s.section}</div>
+
+    <div style="font-size:18px; margin-top:6px; color:#555;">問題：</div>
+    <div style="font-size:22px; font-weight:700; margin-top:4px;">
+      ${q.prompt}
+    </div>
+
+    <div style="margin-top:10px; display:grid; gap:8px;">
+      ${q.choices.map((c, i) => `
+        <button class="choice-btn" data-index="${i}"
+          style="width:100%; text-align:left; padding:12px; border-radius:10px;">
+          ${String.fromCharCode(65 + i)}. ${c}
+        </button>
+      `).join('')}
+    </div>
+
+    <div id="feedback" style="margin-top:10px; font-size:14px;"></div>
+    <button id="nextBtn" style="margin-top:10px; display:none;">次へ</button>
+  `;
+  list.appendChild(card);
+
+  const buttons = [...card.querySelectorAll('.choice-btn')];
+  const feedback = card.querySelector('#feedback');
+  const nextBtn = card.querySelector('#nextBtn');
+
+  let locked = false;
+
+  buttons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // itemクリック扱いを避ける（保険）
+      if (locked) return;
+      locked = true;
+
+      const chosen = Number(btn.dataset.index);
+      const correct = q.correctIndex;
+
+      if (chosen === correct) {
+        s.correct += 1;
+        feedback.textContent = '✅ 正解';
+      } else {
+        feedback.innerHTML = `❌ 不正解<br>正解：<strong>${q.choices[correct]}</strong>`;
+        s.wrong.push({
+          prompt: q.prompt,
+          correct: q.choices[correct],
+          chosen: q.choices[chosen],
+          mode: s.mode
+        });
+      }
+			// ★追加：例文穴埋め（CLOZE）のときは「例文」と「例文訳」を表示
+			if ((s.mode === 'CLOZE' || s.type === 'cloze') &&
+			    ((q.rawExampleEn && q.rawExampleEn.trim()) || (q.extraJa && q.extraJa.trim()))) {
+
+			  const current = feedback.innerHTML || feedback.textContent || '';
+			  const rawEn = q.rawExampleEn ? q.rawExampleEn.trim() : '';
+			  const ja = q.extraJa ? q.extraJa.trim() : '';
+
+			  feedback.innerHTML = `
+			    ${current}
+			    <div style="margin-top:10px; padding:10px; background:#f0f4f8; border-radius:10px;">
+			      ${rawEn ? `
+			        <div style="font-size:12px; color:#666;">例文</div>
+			        <div style="margin-top:4px; font-weight:600;">${rawEn}</div>
+			      ` : ''}
+			      ${ja ? `
+			        <div style="font-size:12px; color:#666; margin-top:8px;">例文訳</div>
+			        <div style="margin-top:4px; color:#333;">${ja}</div>
+			      ` : ''}
+			    </div>
+			  `;
+			}
+
+			// ★ここで記録
+			recordAnswerToMistakes(s.section, q.word.english, chosen === correct);
+
+      buttons.forEach((b, i) => {
+        b.disabled = true;
+        if (i === correct) b.style.border = '2px solid #66bb6a';
+        if (i === chosen && chosen !== correct) b.style.border = '2px solid #ef5350';
+        b.style.background = '#fff';
+      });
+
+      nextBtn.style.display = 'inline-block';
+    });
+  });
+
+  nextBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    s.index += 1;
+    if (s.index >= s.questions.length) renderTestResult();
+    else renderTestScreen();
+  });
+}
+
+function renderTestResult() {
+  const s = testState;
+  const total = s.questions.length;
+  const score = Math.round((s.correct / total) * 100);
+
+  document.getElementById('header').innerHTML = `
+    <span class="back" onclick="showWordList('${s.section}')">← 単語一覧へ</span>
+    テスト結果
+    <div class="progress">${s.correct} / ${total}（${score}%）</div>
+  `;
+
+	const retryAction =
+	  (s.mode === 'CLOZE' || s.type === 'cloze')
+	    ? `startClozeTest('${s.section}', ${total})`
+	    : (s.isWeak
+	        ? `startWeakTest('${s.section}', ${total}, '${s.mode}')`
+	        : `startTest('${s.section}', ${total}, '${s.mode}')`);
+
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+
+  const resultCard = document.createElement('div');
+  resultCard.className = 'item';
+  resultCard.innerHTML = `
+    <div style="font-size:18px; font-weight:700;">スコア：${score}%</div>
+    <div style="margin-top:6px;">正解：${s.correct} / ${total}</div>
+    <div style="margin-top:10px;">
+      <button onclick="${retryAction}">もう一度（同数）</button>
+      <button style="margin-left:6px;" onclick="showWordList('${s.section}')">単語一覧へ</button>
+    </div>
+  `;
+  list.appendChild(resultCard);
+
+	if (s.wrong.length) {
+	  const wrongCard = document.createElement('div');
+	  wrongCard.className = 'item';
+	  wrongCard.innerHTML = `
+	    <strong>間違えた問題</strong>
+	    <div style="margin-top:8px; display:grid; gap:8px;">
+	      ${s.wrong.map(x => `
+	        <div style="padding:10px; background:#f7f7f7; border-radius:10px;">
+	          <div style="font-weight:700;">問題：${x.prompt}</div>
+	          <div style="font-size:13px; margin-top:4px;">
+	            正解：${x.correct}<br>
+	            選択：${x.chosen}
+	          </div>
+	        </div>
+	      `).join('')}
+	    </div>
+	  `;
+	  list.appendChild(wrongCard);
+	}
+}
+
+// 間違いノートの読み書き
+function mistakesKey(section) {
+  return `eiken2_mistakes_${String(section)}`;
+}
+
+function loadMistakes(section) {
+  return JSON.parse(localStorage.getItem(mistakesKey(section)) || '{}');
+}
+
+function saveMistakes(section, obj) {
+  localStorage.setItem(mistakesKey(section), JSON.stringify(obj));
+}
+
+// 間違い帳画面を表示する関数
+function showMistakeList(section) {
+  section = String(section);
+
+  const mistakes = loadMistakes(section); // { english: {...} }
+  const wordsInSection = allWords.filter(w => w.section === section);
+
+  // mistakesに載っている単語だけ、辞書（日本語など）も引けるように
+  const rows = Object.entries(mistakes)
+    .map(([english, m]) => {
+      const w = wordsInSection.find(x => x.english === english);
+      return {
+        english,
+        japanese: w ? w.japanese : '(単語データなし)',
+        pos: w ? w.品詞 : '',
+        wrong: m.wrong || 0,
+        right: m.right || 0,
+        streak: m.streak || 0,
+        lastWrong: m.lastWrong || '',
+        lastRight: m.lastRight || ''
+      };
+    })
+    // 「間違いが1回以上あるもの」だけに絞る（rightだけの記録が混じってもOK）
+    .filter(x => x.wrong > 0);
+
+  // 並び順：間違い多い→最近間違い→英語
+  rows.sort((a, b) => {
+    if (b.wrong !== a.wrong) return b.wrong - a.wrong;
+    const aw = a.lastWrong ? Date.parse(a.lastWrong) : 0;
+    const bw = b.lastWrong ? Date.parse(b.lastWrong) : 0;
+    if (bw !== aw) return bw - aw;
+    return a.english.localeCompare(b.english);
+  });
+
+  // ヘッダー
+  document.getElementById('header').innerHTML = `
+    <span class="back" onclick="showWordList('${section}')">← 単語一覧へ</span>
+    間違い帳（Section ${section}）
+    <div class="progress">
+      間違い単語：${rows.length} 件
+    </div>
+    <div style="margin-top:6px;">
+      <button style="font-size:12px;"
+        onclick="startWeakTest('${section}', 10, 'E2J')">
+        弱点テスト英→日
+      </button>
+      <button style="font-size:12px; margin-left:6px;"
+        onclick="startWeakTest('${section}', 10, 'J2E')">
+        弱点テスト日→英
+      </button>
+      <button style="font-size:12px; margin-left:6px;"
+        onclick="resetMistakes('${section}')">
+        間違い帳リセット
+      </button>
+    </div>
+  `;
+
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+
+  // 0件なら案内
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'item';
+    empty.innerHTML = `
+      <strong>まだ間違い帳が空です</strong>
+      <div style="margin-top:6px; font-size:13px; color:#555;">
+        通常テスト/弱点テストで間違えると自動で記録されます。
+      </div>
+    `;
+    list.appendChild(empty);
+    return;
+  }
+
+  // 一覧カード
+  rows.forEach(r => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `
+      <div style="display:flex; justify-content:space-between; gap:10px;">
+        <div>
+          <div style="font-size:12px; color:#888;">
+            ${r.pos ? r.pos : ''} ${r.lastWrong ? `・最終ミス ${r.lastWrong}` : ''}
+          </div>
+          <div style="font-weight:800; font-size:18px;">${r.english}</div>
+          <div style="margin-top:6px; color:#333;">${r.japanese}</div>
+          <div style="margin-top:6px; font-size:12px; color:#666;">
+            wrong: ${r.wrong} / right: ${r.right} / streak: ${r.streak}
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:6px; min-width:110px;">
+          <button style="font-size:12px;"
+            onclick="event.stopPropagation(); startOneWeakTest('${section}', '${r.english}', 'E2J')">
+            これだけ英→日
+          </button>
+          <button style="font-size:12px;"
+            onclick="event.stopPropagation(); startOneWeakTest('${section}', '${r.english}', 'J2E')">
+            これだけ日→英
+          </button>
+          <button style="font-size:12px;"
+            onclick="event.stopPropagation(); clearOneMistake('${section}', '${r.english}')">
+            この単語を削除
+          </button>
+        </div>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+}
+
+//正誤を記録（ここが「間違いノート」本体）
+function recordAnswerToMistakes(section, english, isCorrect) {
+  const today = todayStr();
+  const data = loadMistakes(section);
+  const cur = data[english] || { wrong: 0, right: 0, streak: 0, lastWrong: null, lastRight: null };
+
+  if (isCorrect) {
+    cur.right += 1;
+    cur.streak = (cur.streak || 0) + 1;
+    cur.lastRight = today;
+  } else {
+    cur.wrong += 1;
+    cur.streak = 0;
+    cur.lastWrong = today;
+  }
+
+  data[english] = cur;
+  saveMistakes(section, data);
+}
+
+// 弱点候補を作る（重み付きシャッフル）
+function pickWeakWords(section, count, mode) {
+  const mistakes = loadMistakes(section);
+
+  // セクション内の単語
+  const words = allWords.filter(w => w.section === String(section));
+
+  // 未習得のみONなら未習得に絞る（既存仕様に合わせる）
+  const key = `eiken2_section_${section}`;
+  const learned = JSON.parse(localStorage.getItem(key) || '{}');
+  let pool = words;
+  if (showOnlyUnlearned) pool = pool.filter(w => !learned[w.english]);
+
+  // 各単語にスコアをつける（大きいほど弱点）
+  const scored = pool.map(w => {
+    const m = mistakes[w.english];
+    const wrong = m ? m.wrong : 0;
+    const streak = m ? (m.streak || 0) : 0;
+    const lastWrong = m && m.lastWrong ? Date.parse(m.lastWrong) : 0;
+
+    // スコア例：間違い×10 + 最近間違い（最大10） - 連続正解×3
+    const recencyBonus = lastWrong ? Math.min(10, Math.floor((Date.now() - lastWrong) / (1000*60*60*24)) * -1 + 10) : 0;
+    const score = wrong * 10 + recencyBonus - streak * 3;
+
+    return { w, score };
+  });
+
+  // まず“間違いがある単語”を優先
+  const hasMistake = scored.filter(x => (loadMistakes(section)[x.w.english]?.wrong || 0) > 0);
+
+  // 弱点が少ない場合は通常プールから補う
+  const base = (hasMistake.length >= 4) ? hasMistake : scored;
+
+  // スコア降順 → 上位を多めに取り、最後にランダム性を加える
+  base.sort((a, b) => b.score - a.score);
+  const candidates = base.slice(0, Math.max(10, count * 3)).map(x => x.w);
+
+  // 問題数だけピック（候補が少なければ全体から）
+  const picked = shuffle([...new Set(candidates)]).slice(0, Math.min(count, candidates.length));
+
+  return picked;
+}
+
+// 弱点テスト開始関数（startTestとほぼ同じ）
+function startWeakTest(section, numQuestions = 10, mode = 'E2J') {
+  section = String(section);
+  currentSection = section;
+
+  // 弱点から問題用単語を選ぶ
+  const picked = pickWeakWords(section, numQuestions, mode);
+
+  // 4択には最低4語必要
+  if (picked.length < 4) {
+    alert('弱点テストを作るための単語数が足りません（最低4語必要）。まず通常テストで間違いを蓄積してね。');
+    return;
+  }
+
+  const questions = picked.map(word => {
+    const prompt = (mode === 'E2J') ? word.english : word.japanese;
+    const correct = (mode === 'E2J') ? word.japanese : word.english;
+
+    const others = allWords
+      .filter(w => w.section === section && w.english !== word.english)
+      .map(w => (mode === 'E2J') ? w.japanese : w.english);
+
+    let distractors = uniqueShuffle(others).slice(0, 3);
+
+    // 保険：重複などで3つ作れない場合
+    if (distractors.length < 3) {
+      const fallback = uniqueShuffle(allWords.map(w => (mode === 'E2J') ? w.japanese : w.english))
+        .filter(x => x !== correct);
+      while (distractors.length < 3 && fallback.length) distractors.push(fallback.shift());
+    }
+
+    const choices = shuffle([correct, ...distractors]);
+    const correctIndex = choices.indexOf(correct);
+
+    return { word, prompt, choices, correctIndex };
+  });
+
+  testState = {
+    section,
+    mode,
+    isWeak: true,           // ★弱点テストかどうか
+    questions,
+    index: 0,
+    correct: 0,
+    wrong: []
+  };
+
+  renderTestScreen();
+}
+
+// 例文穴埋めテスト開始関数
+function startClozeTest(section, numQuestions = 10) {
+  section = String(section);
+  currentSection = section;
+
+	if (sectionHasPhrase(section)) {
+	  alert('このセクションには熟語カテゴリ（A_phrase / B_phrase）が含まれるため、例文穴埋めは無効です。');
+	  return;
+	}
+
+  // セクション内の例文あり単語
+  let pool = allWords
+    .filter(w => w.section === section)
+    .filter(w => w.example_en && w.example_en.trim());
+
+  // 未習得のみONなら未習得だけ
+  const key = `eiken2_section_${section}`;
+  learnedData = JSON.parse(localStorage.getItem(key) || '{}');
+  if (showOnlyUnlearned) {
+    pool = pool.filter(w => !learnedData[w.english]);
+  }
+
+  if (pool.length < 4) {
+    alert('例文穴埋めに使える単語が足りません（最低4語必要）。');
+    return;
+  }
+
+  // 問題数を調整してピック
+  const n = Math.min(numQuestions, pool.length);
+  const picked = shuffle([...pool]).slice(0, n);
+
+  // 問題作成（穴埋め文 + 4択英単語）
+  const questions = picked.map(word => {
+    const sentence = makeClozeSentence(word.english, word.example_en);
+
+    // 誤答候補（同セクションから英単語）
+    const others = allWords
+      .filter(w => w.section === section && w.english !== word.english)
+      .map(w => w.english);
+
+    let distractors = uniqueShuffle(others).slice(0, 3);
+
+    // 保険：3つ取れない時は全体から補充
+    if (distractors.length < 3) {
+      const fallback = uniqueShuffle(allWords.map(w => w.english))
+        .filter(x => x !== word.english);
+      while (distractors.length < 3 && fallback.length) distractors.push(fallback.shift());
+    }
+
+    const choices = shuffle([word.english, ...distractors]);
+    const correctIndex = choices.indexOf(word.english);
+
+    return {
+      word,
+      prompt: sentence,           // renderTestScreenが表示する
+      choices,
+      correctIndex,
+      extraJa: word.example_ja || '', // 例文日本語訳
+			rawExampleEn: word.example_en || '' // ★穴なし例文
+    };
+  });
+
+  testState = {
+    section,
+    mode: 'CLOZE',   // 表示ラベル用
+    type: 'cloze',   // 区別用
+    questions,
+    index: 0,
+    correct: 0,
+    wrong: []
+  };
+
+  renderTestScreen(); // 既存の画面描画を流用
+}
+
+// 間違い帳のリセット／単語ごと削除
+function resetMistakes(section) {
+  section = String(section);
+  const ok = confirm(`Section ${section} の間違い帳をリセットしますか？`);
+  if (!ok) return;
+  localStorage.removeItem(mistakesKey(section));
+  showMistakeList(section);
+}
+
+function clearOneMistake(section, english) {
+  section = String(section);
+  const data = loadMistakes(section);
+  delete data[english];
+  saveMistakes(section, data);
+  showMistakeList(section);
+}
+
+// 「この単語だけテスト」
+function startOneWeakTest(section, english, mode = 'E2J') {
+  section = String(section);
+  const w = allWords.find(x => x.section === section && x.english === english);
+  if (!w) return;
+
+  // 4択を作るために同セクションから誤答3つ必要
+  const pool = allWords.filter(x => x.section === section && x.english !== english);
+  if (pool.length < 3) {
+    alert('選択肢を作るための単語数が足りません。');
+    return;
+  }
+
+  const prompt = (mode === 'E2J') ? w.english : w.japanese;
+  const correct = (mode === 'E2J') ? w.japanese : w.english;
+
+  let others = pool.map(x => (mode === 'E2J') ? x.japanese : x.english);
+  let distractors = uniqueShuffle(others).slice(0, 3);
+
+  const choices = shuffle([correct, ...distractors]);
+  const correctIndex = choices.indexOf(correct);
+
+  testState = {
+    section,
+    mode,
+    isWeak: true,
+    questions: [{ word: w, prompt, choices, correctIndex }],
+    index: 0,
+    correct: 0,
+    wrong: []
+  };
+
+  renderTestScreen();
+}
+
+// 例文を穴埋めにする関数
+// 例：last → lasted / lasts / lasting を拾う（超厳密ではないが実用的）
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isVowel(ch) {
+  return 'aeiou'.includes(ch.toLowerCase());
+}
+
+// CVC（子音-母音-子音）かざっくり判定
+// stop, plan, drop などを拾う
+function isCVC(word) {
+  if (word.length < 3) return false;
+  const w = word.toLowerCase();
+  const a = w[w.length - 3];
+  const b = w[w.length - 2];
+  const c = w[w.length - 1];
+
+  // 最後が w/x/y は通常重複しにくいので除外
+  if ('wxy'.includes(c)) return false;
+
+  return !isVowel(a) && isVowel(b) && !isVowel(c);
+}
+
+function buildClozeRegex(base) {
+  const b = escapeRegExp(base);
+  const lower = base.toLowerCase();
+
+  // ★ 不規則形が登録されていれば、それも含めて置換対象にする
+  const forms = IRREGULAR_FORMS[lower];
+  if (forms && forms.length) {
+    // base自身も含める（run など）
+    const all = [base, ...forms];
+    // 長い形を先に（written が write より先にマッチするように）
+    all.sort((a, b) => b.length - a.length);
+
+    const pattern = all.map(escapeRegExp).join('|');
+    return new RegExp(`\\b(${pattern})\\b`, 'i');
+  }
+
+  // -----------------------------
+  // 1) 語尾e（fine -> fined, fining）
+  // -----------------------------
+  if (lower.endsWith('e') && base.length >= 2) {
+    const stem = escapeRegExp(base.slice(0, -1)); // eを落とす
+    return new RegExp(
+      `\\b(${b}(?:s|es|d)?|${stem}ing)\\b`,
+      'i'
+    );
+  }
+
+  // -----------------------------
+  // 2) 子音 + y（study -> studied, studies）
+  // -----------------------------
+  if (lower.endsWith('y') && base.length >= 2) {
+    const prev = lower[lower.length - 2];
+    if (!isVowel(prev)) {
+      const stem = escapeRegExp(base.slice(0, -1)); // stud
+      return new RegExp(
+        `\\b(${b}|${stem}(?:ies|ied))\\b`,
+        'i'
+      );
+    }
+  }
+
+  // -----------------------------
+  // 3) CVC（stop -> stopped, stopping）
+  // -----------------------------
+  if (isCVC(base)) {
+    const last = escapeRegExp(base[base.length - 1]); // p
+    // stop -> stopp + ed/ing
+    const doubled = escapeRegExp(base + base[base.length - 1]); // stopp
+    return new RegExp(
+      `\\b(${b}(?:s|es)?|${b}ed|${b}ing|${doubled}(?:ed|ing))\\b`,
+      'i'
+    );
+  }
+
+  // -----------------------------
+  // 4) 通常（issue -> issues / issued は上でe扱い）
+  // -----------------------------
+  return new RegExp(
+    `\\b(${b}(?:s|es|ed|ing)?)\\b`,
+    'i'
+  );
+}
+
+function makeClozeSentence(english, example) {
+  const re = buildClozeRegex(english);
+
+  // まずは活用込みで置換
+  if (re.test(example)) {
+    return example.replace(re, '_____');
+  }
+
+  // 見つからない場合は、単に先頭に穴埋め表記を足して出す（保険）
+  // （例文にその単語が入ってないデータが混ざっても壊れない）
+  return `_____  ${example}`;
+}
+
+// 熟語か一般品詞かの判別
+function sectionHasPhrase(section) {
+  section = String(section);
+  return allWords.some(w =>
+    String(w.section) === section &&
+    (w.category === 'A_phrase' || w.category === 'B_phrase')
+  );
+}
+
+// ===== ユーティリティ =====
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function uniqueShuffle(arr) {
+  // 重複を除いてシャッフル
+  return shuffle([...new Set(arr)]);
+}
 
 </script>
 
 </body>
 </html>
-
-
