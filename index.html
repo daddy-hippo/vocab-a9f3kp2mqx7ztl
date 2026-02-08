@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>英検２級単語(Ver.3)</title>
+<title>英検単語学習アプリ</title>
 <style>
 body { font-family: system-ui; margin:0; background:#f5f5f5; }
 header { background:#1e88e5; color:white; padding:14px; text-align:center; }
@@ -87,10 +87,20 @@ header span#todayCount {
 </head>
 <body>
 
-<header id="header">英検２級 単語学習(Ver.3)</header>
+<header id="header">英検単語学習アプリ</header>
 <div class="list" id="list"></div>
 
 <script>
+const APP_NAME = '英検単語';
+const APP_VERSION = '(２級-Ver.4)';
+function setHeader(html) {
+  document.getElementById('header').innerHTML = `
+    <div style="font-weight:700;">${APP_NAME} <span style="font-size:12px;">${APP_VERSION}</span></div>
+    <div style="margin-top:6px;">${html}</div>
+  `;
+}
+document.title = `${APP_NAME} ${APP_VERSION}`;
+
 let currentSection = null;
 // let allWords = [];
 // fetchせずに直接JSONデータをJS配列として宣言
@@ -17141,7 +17151,7 @@ showSectionList();
 
 function showSectionList() {
   currentSection = null;
-  document.getElementById('header').textContent = '英検２級 単語学習(Ver.3)';
+	setHeader('セクション一覧');
   const list = document.getElementById('list');
   list.innerHTML = '';
 
@@ -17247,7 +17257,7 @@ function showWordList(section) {
   list.innerHTML = '';
 
 	const hasPhrase = sectionHasPhrase(section);
-  document.getElementById('header').innerHTML = `
+	setHeader(`
     <span class="back" onclick="showSectionList()">← 戻る</span>
     Section ${section}
     <div class="progress">
@@ -17300,7 +17310,7 @@ function showWordList(section) {
 		  onclick="showMistakeList('${section}')">
 		  間違い帳
 		</button>
- `;
+ `);
 
   allWords
     .filter(w => w.section === section)
@@ -17544,13 +17554,13 @@ function renderTestScreen() {
 	  (s.mode === 'J2E') ? '日→英 4択' :
 	  '例文穴埋め 4択';
 
-  document.getElementById('header').innerHTML = `
+	setHeader(`
     <span class="back" onclick="showWordList('${s.section}')">← 単語一覧へ</span>
     テスト（${modeLabel}）
     <div class="progress">
       第 ${s.index + 1} 問 / ${s.questions.length}　正解：${s.correct}
     </div>
-  `;
+  `);
 
   const list = document.getElementById('list');
   list.innerHTML = '';
@@ -17753,7 +17763,7 @@ function showMistakeList(section) {
   });
 
   // ヘッダー
-  document.getElementById('header').innerHTML = `
+	setHeader(`
     <span class="back" onclick="showWordList('${section}')">← 単語一覧へ</span>
     間違い帳（Section ${section}）
     <div class="progress">
@@ -17773,7 +17783,7 @@ function showMistakeList(section) {
         間違い帳リセット
       </button>
     </div>
-  `;
+  `);
 
   const list = document.getElementById('list');
   list.innerHTML = '';
